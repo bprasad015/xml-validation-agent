@@ -15,7 +15,7 @@ env:
   ANSIBLE_CONFIG: "${{ github.workspace }}/ansible.cfg"
   ANSIBLE_ROLES_PATH: "${{ github.workspace }}/roles"
   ANSIBLE_LIBRARY: "${{ github.workspace }}/plugins/modules"
-  ANSIBLE_COLLECTIONS_PATHS: "${{ github.workspace }}/collections:${{ github.workspace }}/.ansible/collections:/usr/share/ansible/collections"
+  ANSIBLE_COLLECTIONS_PATH: "${{ github.workspace }}/collections:${{ github.workspace }}/.ansible/collections:/usr/share/ansible/collections"
   ANSIBLE_STDOUT_CALLBACK: yaml
   PYTHONPATH: "${{ github.workspace }}"
 
