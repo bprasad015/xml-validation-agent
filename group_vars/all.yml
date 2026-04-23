@@ -1,0 +1,3 @@
+---
+xml_validation_output_dir: /tmp/xml-validation-agent
+xml_validation_output_file: "{{ xml_validation_output_dir }}/payload.xml"

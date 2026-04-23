@@ -1,0 +1,41 @@
+---
+- name: Module smoke test
+  hosts: ci
+  gather_facts: false
+  vars:
+    valid_payload: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../fixtures/valid_payload.xml') }}"
+    invalid_payload: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../fixtures/invalid_payload.xml') }}"
+  tasks:
+    - name: Validate a known-good payload
+      xml_validate:
+        xml_content: "{{ valid_payload }}"
+      register: xml_validation_valid_result
+
+    - name: Assert known-good payload result
+      ansible.builtin.assert:
+        that:
+          - xml_validation_valid_result.valid
+          - not xml_validation_valid_result.changed
+
+    - name: Validate malformed payload and expect a failure
+      block:
+        - name: Run module with invalid payload
+          xml_validate:
+            xml_content: "{{ invalid_payload }}"
+          register: xml_validation_invalid_result
+      rescue:
+        - name: Assert module failure message is descriptive
+          ansible.builtin.assert:
+            that:
+              - "'XML validation failed:' in ansible_failed_result.msg"
+              - ansible_failed_result.parse_error is defined
+          changed_when: false
+
+        - name: Mark expected failure path as executed
+          ansible.builtin.set_fact:
+            xml_validation_expected_failure_seen: true
+
+    - name: Confirm invalid payload failed as expected
+      ansible.builtin.assert:
+        that:
+          - xml_validation_expected_failure_seen | default(false)

@@ -1,0 +1,23 @@
+---
+- name: Ensure validation output directory exists
+  ansible.builtin.file:
+    path: "{{ xml_validation_output_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Write XML payload used by integration tests
+  ansible.builtin.copy:
+    dest: "{{ xml_validation_output_file }}"
+    content: "{{ xml_validation_content }}"
+    mode: "0644"
+
+- name: Validate XML payload with custom module
+  xml_validate:
+    xml_content: "{{ xml_validation_content }}"
+  register: xml_validation_result
+
+- name: Assert role-level validation contract
+  ansible.builtin.assert:
+    that:
+      - xml_validation_result.valid
+      - not xml_validation_result.changed

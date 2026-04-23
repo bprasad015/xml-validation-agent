@@ -1,0 +1,35 @@
+---
+- name: End-to-end integration for xml-validation-agent
+  hosts: ci
+  gather_facts: false
+  tasks:
+    - name: Apply xml_validation role
+      ansible.builtin.include_role:
+        name: xml_validation
+
+    - name: Confirm role output file exists
+      ansible.builtin.stat:
+        path: "{{ xml_validation_output_file }}"
+      register: xml_validation_file
+
+    - name: Assert output file was created
+      ansible.builtin.assert:
+        that:
+          - xml_validation_file.stat.exists
+          - xml_validation_file.stat.isreg
+
+    - name: Read output file content for second-pass validation
+      ansible.builtin.slurp:
+        src: "{{ xml_validation_output_file }}"
+      register: xml_validation_payload
+
+    - name: Re-validate output file with custom module
+      xml_validate:
+        xml_content: "{{ xml_validation_payload.content | b64decode }}"
+      register: xml_validation_second_pass
+
+    - name: Assert second-pass validation results
+      ansible.builtin.assert:
+        that:
+          - xml_validation_second_pass.valid
+          - not xml_validation_second_pass.changed

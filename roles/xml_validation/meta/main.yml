@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: xml_validation
+  author: xml-validation-agent
+  description: Write XML payload to disk and validate it with a custom module.
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+dependencies: []

@@ -1,0 +1,21 @@
+---
+- name: Role smoke test
+  hosts: ci
+  gather_facts: false
+  vars:
+    xml_validation_content: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../fixtures/valid_payload.xml') }}"
+  tasks:
+    - name: Run xml_validation role
+      ansible.builtin.include_role:
+        name: xml_validation
+
+    - name: Check that role wrote the output file
+      ansible.builtin.stat:
+        path: "{{ xml_validation_output_file }}"
+      register: xml_validation_stat
+
+    - name: Assert role smoke output
+      ansible.builtin.assert:
+        that:
+          - xml_validation_stat.stat.exists
+          - xml_validation_stat.stat.isreg
