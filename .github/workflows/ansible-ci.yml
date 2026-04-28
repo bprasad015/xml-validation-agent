@@ -98,12 +98,37 @@ jobs:
         run: |
           ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/role_smoke.yml --syntax-check
           ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/module_smoke.yml --syntax-check
+          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/agentic_module_smoke.yml --syntax-check
 
       - name: Execute role smoke playbook
         run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/role_smoke.yml
 
       - name: Execute module smoke playbook
         run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/module_smoke.yml
+
+      - name: Start mock LLM provider
+        run: |
+          python tests/tools/mock_llm_server.py --host 127.0.0.1 --port 8765 &
+          echo $! > mock-llm.pid
+          for attempt in {1..10}; do
+            if curl --fail --silent http://127.0.0.1:8765/healthz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Execute agentic module smoke playbook
+        env:
+          MOCK_LLM_PROVIDER_URL: http://127.0.0.1:8765/v1/chat/completions
+        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/agentic_module_smoke.yml
+
+      - name: Stop mock LLM provider
+        if: always()
+        run: |
+          if [ -f mock-llm.pid ]; then
+            kill "$(cat mock-llm.pid)"
+          fi
 
   integration-playbook:
     runs-on: ubuntu-latest

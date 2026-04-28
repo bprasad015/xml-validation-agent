@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmlValidationConfig environment="{{ xml_validation_environment | default('ci') }}">
+  <metadata>
+    <name>{{ xml_validation_service_name | default('xml-validation-agent') }}</name>
+    <owner>{{ xml_validation_owner | default('platform-engineering') }}</owner>
+  </metadata>
+  <endpoint protocol="{{ xml_validation_protocol | default('https') }}">
+    <host>{{ xml_validation_host | default('localhost') }}</host>
+    <port>{{ xml_validation_port | default(443) }}</port>
+  </endpoint>
+  <features>
+{% for feature in xml_validation_features | default(['xml-render', 'llm-review']) %}
+    <feature enabled="true">{{ feature }}</feature>
+{% endfor %}
+  </features>
+</xmlValidationConfig>

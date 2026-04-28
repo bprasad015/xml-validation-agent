@@ -1,0 +1,43 @@
+---
+- name: Agentic XML validate module smoke test
+  hosts: ci
+  gather_facts: false
+  vars:
+    agentic_xml_template: "{{ playbook_dir }}/../../roles/xml_validation/templates/dummy.xml.j2"
+    mock_llm_url: "http://127.0.0.1:8765/v1/chat/completions"
+  tasks:
+    - name: Validate dummy XML template with mocked LLM provider
+      agentic_xml_validate:
+        src: "{{ agentic_xml_template }}"
+        template_vars:
+          xml_validation_environment: ci
+          xml_validation_service_name: agentic-xml-smoke
+          xml_validation_owner: network-automation
+          xml_validation_host: example.internal
+          xml_validation_port: 8443
+          xml_validation_features:
+            - xml-render
+            - llm-review
+            - inventory-context
+        api_key: ci-test-key
+        provider_url: "{{ lookup('ansible.builtin.env', 'MOCK_LLM_PROVIDER_URL') | default(mock_llm_url, true) }}"
+        model: mock-xml-validator
+        playbook_path: "{{ playbook_dir }}/agentic_module_smoke.yml"
+        role_path: "{{ playbook_dir }}/../../roles/xml_validation"
+        inventory_path: "{{ playbook_dir }}/../../inventories/ci/hosts.ini"
+        group_vars_path: "{{ playbook_dir }}/../../group_vars"
+        host_vars_path: "{{ playbook_dir }}/../../host_vars"
+        extra_context:
+          source: github-actions-smoke-test
+          expected_service: agentic-xml-smoke
+        return_rendered: true
+      register: agentic_xml_validation_result
+
+    - name: Assert agentic validation result
+      ansible.builtin.assert:
+        that:
+          - agentic_xml_validation_result.valid
+          - agentic_xml_validation_result.local_xml_valid
+          - not agentic_xml_validation_result.changed
+          - "'agentic-xml-smoke' in agentic_xml_validation_result.rendered_xml"
+          - agentic_xml_validation_result.context_files_used | length > 0
