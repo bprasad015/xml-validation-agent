@@ -16,7 +16,7 @@ env:
   ANSIBLE_ROLES_PATH: "${{ github.workspace }}/roles"
   ANSIBLE_LIBRARY: "${{ github.workspace }}/plugins/modules"
   ANSIBLE_COLLECTIONS_PATH: "${{ github.workspace }}/collections:${{ github.workspace }}/.ansible/collections:/usr/share/ansible/collections"
-  ANSIBLE_STDOUT_CALLBACK: yaml
+  ANSIBLE_STDOUT_CALLBACK: default
   PYTHONPATH: "${{ github.workspace }}"
 
 jobs:
