@@ -6,6 +6,7 @@
     - name: Apply xml_validation role
       ansible.builtin.include_role:
         name: xml_validation
+        public: true
 
     - name: Confirm role output file exists
       ansible.builtin.stat:

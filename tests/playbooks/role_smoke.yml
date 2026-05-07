@@ -8,6 +8,7 @@
     - name: Run xml_validation role
       ansible.builtin.include_role:
         name: xml_validation
+        public: true
 
     - name: Check that role wrote the output file
       ansible.builtin.stat:
