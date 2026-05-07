@@ -3,22 +3,55 @@
   hosts: ci
   gather_facts: false
   vars:
-    agentic_xml_template: "{{ playbook_dir }}/../../roles/xml_validation/templates/dummy.xml.j2"
+    agentic_xml_template: "{{ playbook_dir }}/../../roles/xml_validation/templates/service_config.xml.j2"
     mock_llm_url: "http://127.0.0.1:8765/v1/chat/completions"
+    agentic_xml_template_vars:
+      xml_validation_environment: ci
+      xml_validation_service_name: agentic-xml-smoke
+      xml_validation_owner: network-automation
+      xml_validation_change_ticket: CHG-2026-0001
+      xml_validation_protocol: https
+      xml_validation_host: example.internal
+      xml_validation_port: 8443
+      xml_validation_tls_enabled: "true"
+      xml_validation_certificate_profile: internal-mtls
+      xml_validation_backend_pool:
+        - name: primary-api
+          host: api-1.example.internal
+          port: 9443
+          weight: 100
+        - name: standby-api
+          host: api-2.example.internal
+          port: 9443
+          weight: 50
+      xml_validation_routes:
+        - name: health-check
+          priority: 10
+          method: GET
+          path: /healthz
+          backend: primary-api
+        - name: order-writes
+          priority: 20
+          method: POST
+          path: /v1/orders
+          backend: primary-api
+      xml_validation_features:
+        - xml-render
+        - llm-review
+        - inventory-context
+        - backend-routing
+      xml_validation_allowed_status_codes:
+        - 200
+        - 201
+        - 204
+      xml_validation_max_payload_kb: 512
+      xml_validation_logging_profile: structured-json
+      xml_validation_metrics_enabled: "true"
   tasks:
-    - name: Validate dummy XML template with mocked LLM provider
+    - name: Validate service XML template with mocked LLM provider
       agentic_xml_validate:
         src: "{{ agentic_xml_template }}"
-        template_vars:
-          xml_validation_environment: ci
-          xml_validation_service_name: agentic-xml-smoke
-          xml_validation_owner: network-automation
-          xml_validation_host: example.internal
-          xml_validation_port: 8443
-          xml_validation_features:
-            - xml-render
-            - llm-review
-            - inventory-context
+        template_vars: "{{ agentic_xml_template_vars }}"
         api_key: ci-test-key
         provider_url: "{{ lookup('ansible.builtin.env', 'MOCK_LLM_PROVIDER_URL') | default(mock_llm_url, true) }}"
         model: mock-xml-validator
@@ -33,6 +66,16 @@
         return_rendered: true
       register: agentic_xml_validation_result
 
+    - name: Show XML validation summary
+      ansible.builtin.debug:
+        msg:
+          valid: "{{ agentic_xml_validation_result.valid }}"
+          local_xml_valid: "{{ agentic_xml_validation_result.local_xml_valid }}"
+          feedback: "{{ agentic_xml_validation_result.feedback }}"
+          issues: "{{ agentic_xml_validation_result.issues }}"
+          context_files_used: "{{ agentic_xml_validation_result.context_files_used }}"
+          rendered_xml: "{{ agentic_xml_validation_result.rendered_xml }}"
+
     - name: Assert agentic validation result
       ansible.builtin.assert:
         that:
@@ -40,4 +83,34 @@
           - agentic_xml_validation_result.local_xml_valid
           - not agentic_xml_validation_result.changed
           - "'agentic-xml-smoke' in agentic_xml_validation_result.rendered_xml"
+          - "'<serviceConfiguration environment=\"ci\" version=\"1.0\">' in agentic_xml_validation_result.rendered_xml"
+          - "'primary-api' in agentic_xml_validation_result.rendered_xml"
+          - "'/v1/orders' in agentic_xml_validation_result.rendered_xml"
           - agentic_xml_validation_result.context_files_used | length > 0
+
+    - name: Validate AI contract catches a service-context mismatch
+      agentic_xml_validate:
+        src: "{{ agentic_xml_template }}"
+        template_vars: "{{ agentic_xml_template_vars }}"
+        api_key: ci-test-key
+        provider_url: "{{ lookup('ansible.builtin.env', 'MOCK_LLM_PROVIDER_URL') | default(mock_llm_url, true) }}"
+        model: mock-xml-validator
+        playbook_path: "{{ playbook_dir }}/agentic_module_smoke.yml"
+        role_path: "{{ playbook_dir }}/../../roles/xml_validation"
+        inventory_path: "{{ playbook_dir }}/../../inventories/ci/hosts.ini"
+        group_vars_path: "{{ playbook_dir }}/../../group_vars"
+        host_vars_path: "{{ playbook_dir }}/../../host_vars"
+        extra_context:
+          source: github-actions-negative-smoke-test
+          expected_service: unexpected-service
+        fail_on_invalid: false
+        return_rendered: true
+      register: agentic_xml_mismatch_result
+
+    - name: Assert AI contract mismatch is reported without XML parse failure
+      ansible.builtin.assert:
+        that:
+          - not agentic_xml_mismatch_result.valid
+          - agentic_xml_mismatch_result.local_xml_valid
+          - not agentic_xml_mismatch_result.changed
+          - "'Expected service unexpected-service but rendered agentic-xml-smoke.' in (agentic_xml_mismatch_result.issues | to_json)"

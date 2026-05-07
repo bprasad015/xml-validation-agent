@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import xml.etree.ElementTree as element_tree
 from pathlib import Path
 
 import pytest
@@ -149,3 +150,55 @@ def test_render_jinja_template_uses_template_vars(tmp_path):
     rendered = agentic_xml_validate.render_jinja_template(template_path, {"name": "agentic"})
 
     assert rendered == "<config><name>agentic</name></config>"
+
+
+def test_service_config_template_renders_realistic_xml():
+    agentic_xml_validate = _load_module()
+    repo_root = Path(__file__).resolve().parents[4]
+    template_path = repo_root / "roles" / "xml_validation" / "templates" / "service_config.xml.j2"
+
+    rendered = agentic_xml_validate.render_jinja_template(
+        template_path,
+        {
+            "xml_validation_environment": "ci",
+            "xml_validation_service_name": "agentic-xml-smoke",
+            "xml_validation_owner": "network-automation",
+            "xml_validation_change_ticket": "CHG-2026-0001",
+            "xml_validation_protocol": "https",
+            "xml_validation_host": "example.internal",
+            "xml_validation_port": 8443,
+            "xml_validation_tls_enabled": "true",
+            "xml_validation_certificate_profile": "internal-mtls",
+            "xml_validation_backend_pool": [
+                {
+                    "name": "primary-api",
+                    "host": "api-1.example.internal",
+                    "port": 9443,
+                    "weight": 100,
+                }
+            ],
+            "xml_validation_routes": [
+                {
+                    "name": "order-writes",
+                    "priority": 20,
+                    "method": "POST",
+                    "path": "/v1/orders",
+                    "backend": "primary-api",
+                }
+            ],
+            "xml_validation_features": ["xml-render", "llm-review", "backend-routing"],
+            "xml_validation_allowed_status_codes": [200, 201, 204],
+            "xml_validation_max_payload_kb": 512,
+            "xml_validation_logging_profile": "structured-json",
+            "xml_validation_metrics_enabled": "true",
+        },
+    )
+
+    root = element_tree.fromstring(rendered)
+
+    assert root.tag == "serviceConfiguration"
+    assert root.get("environment") == "ci"
+    assert root.findtext("./metadata/serviceName") == "agentic-xml-smoke"
+    assert root.findtext("./endpoint/host") == "example.internal"
+    assert root.find("./backendPool/member").get("name") == "primary-api"
+    assert root.find("./routing/rule/match").get("path") == "/v1/orders"

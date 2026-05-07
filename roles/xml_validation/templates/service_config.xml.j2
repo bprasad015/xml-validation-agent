@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<serviceConfiguration environment="{{ xml_validation_environment | default('ci') | e }}" version="1.0">
+  <metadata>
+    <serviceName>{{ xml_validation_service_name | default('xml-validation-agent') | e }}</serviceName>
+    <owner>{{ xml_validation_owner | default('platform-engineering') | e }}</owner>
+    <changeTicket>{{ xml_validation_change_ticket | default('CHG-0000') | e }}</changeTicket>
+  </metadata>
+  <endpoint protocol="{{ xml_validation_protocol | default('https') | e }}" tlsEnabled="{{ xml_validation_tls_enabled | default('true') | e }}">
+    <host>{{ xml_validation_host | default('localhost') | e }}</host>
+    <port>{{ xml_validation_port | default(443) }}</port>
+    <certificateProfile>{{ xml_validation_certificate_profile | default('default') | e }}</certificateProfile>
+  </endpoint>
+  <backendPool>
+{% for backend in xml_validation_backend_pool | default([]) %}
+    <member name="{{ backend.name | e }}" weight="{{ backend.weight | default(100) }}">
+      <host>{{ backend.host | e }}</host>
+      <port>{{ backend.port | default(443) }}</port>
+    </member>
+{% else %}
+    <member name="local-default" weight="100">
+      <host>localhost</host>
+      <port>443</port>
+    </member>
+{% endfor %}
+  </backendPool>
+  <routing>
+{% for route in xml_validation_routes | default([]) %}
+    <rule name="{{ route.name | e }}" priority="{{ route.priority | default(loop.index) }}">
+      <match method="{{ route.method | default('GET') | e }}" path="{{ route.path | e }}" />
+      <forward backend="{{ route.backend | e }}" />
+    </rule>
+{% endfor %}
+  </routing>
+  <featureFlags>
+{% for feature in xml_validation_features | default(['xml-render', 'llm-review']) %}
+    <feature name="{{ feature | e }}" enabled="true" />
+{% endfor %}
+  </featureFlags>
+  <validationPolicy maxPayloadKb="{{ xml_validation_max_payload_kb | default(256) }}">
+    <allowedStatusCodes>
+{% for code in xml_validation_allowed_status_codes | default([200]) %}
+      <code>{{ code }}</code>
+{% endfor %}
+    </allowedStatusCodes>
+  </validationPolicy>
+  <observability loggingProfile="{{ xml_validation_logging_profile | default('standard') | e }}" metricsEnabled="{{ xml_validation_metrics_enabled | default('true') | e }}" />
+</serviceConfiguration>
