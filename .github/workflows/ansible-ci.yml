@@ -3,8 +3,8 @@ name: ansible-ci
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
+    branches:
+      - main
   push:
     branches:
       - main
