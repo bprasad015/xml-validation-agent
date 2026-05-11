@@ -96,17 +96,38 @@ jobs:
 
       - name: Syntax-check role smoke playbooks
         run: |
-          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/role_smoke.yml --syntax-check
-          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/module_smoke.yml --syntax-check
-          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/agentic_module_smoke.yml --syntax-check
+          ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/role_smoke.yml --syntax-check
+          ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/module_smoke.yml --syntax-check
+          ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/agentic_module_smoke.yml --syntax-check
 
       - name: Execute role smoke playbook
-        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/role_smoke.yml
+        run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/role_smoke.yml
 
       - name: Execute module smoke playbook
-        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/module_smoke.yml
+        run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/module_smoke.yml
+
+      - name: Resolve LLM execution mode
+        id: llm-mode
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_URL: ${{ secrets.LLM_API_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          if [ -n "$LLM_API_KEY" ]; then
+            echo "use_real_llm=true" >> "$GITHUB_OUTPUT"
+            echo "LLM_API_KEY=$LLM_API_KEY" >> "$GITHUB_ENV"
+            if [ -n "$LLM_API_URL" ]; then
+              echo "LLM_API_URL=$LLM_API_URL" >> "$GITHUB_ENV"
+            fi
+            if [ -n "$LLM_MODEL" ]; then
+              echo "LLM_MODEL=$LLM_MODEL" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "use_real_llm=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Start mock LLM provider
+        if: steps.llm-mode.outputs.use_real_llm != 'true'
         run: |
           python tests/tools/mock_llm_server.py --host 127.0.0.1 --port 8765 &
           echo $! > mock-llm.pid
@@ -120,11 +141,14 @@ jobs:
 
       - name: Execute agentic module smoke playbook
         env:
+          LLM_API_KEY: ${{ env.LLM_API_KEY }}
+          LLM_API_URL: ${{ env.LLM_API_URL }}
+          LLM_MODEL: ${{ env.LLM_MODEL }}
           MOCK_LLM_PROVIDER_URL: http://127.0.0.1:8765/v1/chat/completions
-        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/agentic_module_smoke.yml
+        run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/agentic_module_smoke.yml
 
       - name: Stop mock LLM provider
-        if: always()
+        if: always() && steps.llm-mode.outputs.use_real_llm != 'true'
         run: |
           if [ -f mock-llm.pid ]; then
             kill "$(cat mock-llm.pid)"
@@ -155,14 +179,14 @@ jobs:
         run: ansible-galaxy collection install -r requirements.yml
 
       - name: Syntax-check integration playbook
-        run: ansible-playbook -i inventories/ci/hosts.ini playbooks/integration.yml --syntax-check
+        run: ansible-playbook -i inventory/ci/hosts.yml playbooks/integration.yml --syntax-check
 
       - name: Run integration playbook (pass 1)
-        run: ansible-playbook -i inventories/ci/hosts.ini playbooks/integration.yml | tee integration-run-1.log
+        run: ansible-playbook -i inventory/ci/hosts.yml playbooks/integration.yml | tee integration-run-1.log
 
       - name: Run integration playbook (pass 2)
         run: |
-          ansible-playbook -i inventories/ci/hosts.ini playbooks/integration.yml | tee integration-run-2.log
+          ansible-playbook -i inventory/ci/hosts.yml playbooks/integration.yml | tee integration-run-2.log
           grep -E "changed=0.*failed=0" integration-run-2.log
 
       - name: Run post-integration assertion

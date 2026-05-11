@@ -1,0 +1,15 @@
+﻿---
+namespace: pwc
+name: config_validation_agent
+version: 1.0.0
+readme: README.md
+authors:
+  - xml-validation-agent maintainers
+description: Ansible collection for XML configuration validation with optional LLM-assisted review.
+license:
+  - MIT
+tags:
+  - ansible
+  - xml
+  - validation
+  - llm

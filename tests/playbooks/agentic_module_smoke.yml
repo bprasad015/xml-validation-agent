@@ -48,18 +48,42 @@
       xml_validation_logging_profile: structured-json
       xml_validation_metrics_enabled: "true"
   tasks:
-    - name: Validate service XML template with mocked LLM provider
+    - name: Resolve LLM execution mode
+      ansible.builtin.set_fact:
+        llm_api_key: "{{ lookup('ansible.builtin.env', 'LLM_API_KEY') | default('', true) | trim }}"
+        llm_api_url: "{{ lookup('ansible.builtin.env', 'LLM_API_URL') | default('', true) | trim }}"
+        llm_model: "{{ lookup('ansible.builtin.env', 'LLM_MODEL') | default('gpt-4o-mini', true) | trim }}"
+
+    - name: Build provider runtime values
+      ansible.builtin.set_fact:
+        use_real_llm: "{{ llm_api_key | length > 0 }}"
+        llm_provider_url: >-
+          {{
+            llm_api_url
+            if (llm_api_key | length > 0)
+            else (lookup('ansible.builtin.env', 'MOCK_LLM_PROVIDER_URL') | default(mock_llm_url, true) | trim)
+          }}
+
+    - name: Show selected LLM mode
+      ansible.builtin.debug:
+        msg:
+          use_real_llm: "{{ use_real_llm }}"
+          provider_url_supplied: "{{ llm_provider_url | length > 0 }}"
+          provider_url: "{{ llm_provider_url if (not use_real_llm) else (llm_provider_url | default('module default provider', true)) }}"
+          model: "{{ llm_model if use_real_llm else 'mock-xml-validator' }}"
+
+    - name: Validate service XML template with selected LLM provider
       agentic_xml_validate:
         src: "{{ agentic_xml_template }}"
         template_vars: "{{ agentic_xml_template_vars }}"
-        api_key: ci-test-key
-        provider_url: "{{ lookup('ansible.builtin.env', 'MOCK_LLM_PROVIDER_URL') | default(mock_llm_url, true) }}"
-        model: mock-xml-validator
+        api_key: "{{ llm_api_key if use_real_llm else 'ci-test-key' }}"
+        provider_url: "{{ llm_provider_url | default(omit, true) }}"
+        model: "{{ llm_model if use_real_llm else 'mock-xml-validator' }}"
         playbook_path: "{{ playbook_dir }}/agentic_module_smoke.yml"
         role_path: "{{ playbook_dir }}/../../roles/xml_validation"
-        inventory_path: "{{ playbook_dir }}/../../inventories/ci/hosts.ini"
-        group_vars_path: "{{ playbook_dir }}/../../group_vars"
-        host_vars_path: "{{ playbook_dir }}/../../host_vars"
+        inventory_path: "{{ playbook_dir }}/../../inventory/ci/hosts.yml"
+        group_vars_path: "{{ playbook_dir }}/../../inventory/ci/group_vars"
+        host_vars_path: "{{ playbook_dir }}/../../inventory/ci/host_vars"
         extra_context:
           source: github-actions-smoke-test
           expected_service: agentic-xml-smoke
@@ -76,10 +100,9 @@
           context_files_used: "{{ agentic_xml_validation_result.context_files_used }}"
           rendered_xml: "{{ agentic_xml_validation_result.rendered_xml }}"
 
-    - name: Assert agentic validation result
+    - name: Assert agentic validation baseline
       ansible.builtin.assert:
         that:
-          - agentic_xml_validation_result.valid
           - agentic_xml_validation_result.local_xml_valid
           - not agentic_xml_validation_result.changed
           - "'agentic-xml-smoke' in agentic_xml_validation_result.rendered_xml"
@@ -87,6 +110,19 @@
           - "'primary-api' in agentic_xml_validation_result.rendered_xml"
           - "'/v1/orders' in agentic_xml_validation_result.rendered_xml"
           - agentic_xml_validation_result.context_files_used | length > 0
+
+    - name: Assert mock-mode result is deterministic
+      ansible.builtin.assert:
+        that:
+          - agentic_xml_validation_result.valid
+      when: not use_real_llm
+
+    - name: Assert real-provider response contract
+      ansible.builtin.assert:
+        that:
+          - agentic_xml_validation_result.feedback is string
+          - agentic_xml_validation_result.issues is iterable
+      when: use_real_llm
 
     - name: Validate AI contract catches a service-context mismatch
       agentic_xml_validate:
@@ -97,15 +133,16 @@
         model: mock-xml-validator
         playbook_path: "{{ playbook_dir }}/agentic_module_smoke.yml"
         role_path: "{{ playbook_dir }}/../../roles/xml_validation"
-        inventory_path: "{{ playbook_dir }}/../../inventories/ci/hosts.ini"
-        group_vars_path: "{{ playbook_dir }}/../../group_vars"
-        host_vars_path: "{{ playbook_dir }}/../../host_vars"
+        inventory_path: "{{ playbook_dir }}/../../inventory/ci/hosts.yml"
+        group_vars_path: "{{ playbook_dir }}/../../inventory/ci/group_vars"
+        host_vars_path: "{{ playbook_dir }}/../../inventory/ci/host_vars"
         extra_context:
           source: github-actions-negative-smoke-test
           expected_service: unexpected-service
         fail_on_invalid: false
         return_rendered: true
       register: agentic_xml_mismatch_result
+      when: not use_real_llm
 
     - name: Assert AI contract mismatch is reported without XML parse failure
       ansible.builtin.assert:
@@ -114,3 +151,4 @@
           - agentic_xml_mismatch_result.local_xml_valid
           - not agentic_xml_mismatch_result.changed
           - "'Expected service unexpected-service but rendered agentic-xml-smoke.' in (agentic_xml_mismatch_result.issues | to_json)"
+      when: not use_real_llm

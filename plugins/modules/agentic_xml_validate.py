@@ -5,6 +5,7 @@ import json
 import os
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as element_tree
 from pathlib import Path
@@ -18,7 +19,7 @@ version_added: "1.0.0"
 description:
   - Renders a local Jinja XML template, validates the rendered XML locally, and asks an
     OpenAI-compatible LLM endpoint for configuration review and suggested fixes.
-  - The intended collection FQCN is C(pwc.ansible.agentic_xml_validate).
+  - The intended collection FQCN is C(pwc.config_validation_agent.agentic_xml_validate).
   - Run this module on the controller, for example with C(delegate_to: localhost), when
     C(src), playbook, role, inventory, and variable paths live on the Ansible controller.
 options:
@@ -52,6 +53,7 @@ options:
     description:
       - Full OpenAI-compatible chat-completions URL for the LLM provider.
       - May point to enterprise ChatGPT, Azure OpenAI, or a self-hosted compatible endpoint.
+      - When only a base URL is provided, the module appends C(/v1/chat/completions).
     type: str
     default: https://api.openai.com/v1/chat/completions
   model:
@@ -165,7 +167,7 @@ author:
 
 EXAMPLES = r"""
 - name: Validate rendered XML with enterprise LLM review
-  pwc.ansible.agentic_xml_validate:
+  pwc.config_validation_agent.agentic_xml_validate:
     src: "{{ playbook_dir }}/templates/xml_template.xml.j2"
     template_vars: "{{ vars }}"
     api_key: "{{ lookup('ansible.builtin.env', 'LLM_API_KEY') }}"
@@ -173,13 +175,13 @@ EXAMPLES = r"""
     model: "enterprise-chat-model"
     playbook_path: "{{ playbook_dir }}/site.yml"
     inventory_path: "{{ inventory_file | default(omit) }}"
-    group_vars_path: "{{ playbook_dir }}/../group_vars"
+    group_vars_path: "{{ playbook_dir }}/../inventory/ci/group_vars"
     role_path: "{{ role_path | default(omit) }}"
   delegate_to: localhost
   run_once: true
 
 - name: Validate through an Azure OpenAI deployment URL
-  pwc.ansible.agentic_xml_validate:
+  pwc.config_validation_agent.agentic_xml_validate:
     src: "{{ playbook_dir }}/templates/xml_template.xml.j2"
     template_vars: "{{ vars }}"
     api_key: "{{ lookup('ansible.builtin.env', 'AZURE_OPENAI_API_KEY') }}"
@@ -499,6 +501,27 @@ def resolve_api_key(
     raise LlmRequestError(f"LLM API key is required. Set api_key or one of: {names}.")
 
 
+def normalize_provider_url(provider_url: str | None) -> str:
+    """Normalize provider URL when only a base endpoint is provided."""
+    raw = (provider_url or DEFAULT_PROVIDER_URL).strip()
+    if not raw:
+        return DEFAULT_PROVIDER_URL
+
+    parsed = urllib.parse.urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return raw
+
+    path = parsed.path or ""
+    normalized_path = path.rstrip("/")
+    if normalized_path.endswith("/chat/completions"):
+        return raw
+    if normalized_path in {"", "/v1"}:
+        suffix = "/v1/chat/completions" if normalized_path == "" else "/chat/completions"
+        return urllib.parse.urlunparse(parsed._replace(path=f"{normalized_path}{suffix}"))
+
+    return raw
+
+
 def build_validation_prompt(
     *,
     prompt: str,
@@ -759,7 +782,7 @@ def run_validation(params: dict[str, Any]) -> dict[str, Any]:
 
     api_key = resolve_api_key(params.get("api_key"), params.get("api_key_env"))
     llm_payload = query_llm_provider(
-        provider_url=params.get("provider_url") or DEFAULT_PROVIDER_URL,
+        provider_url=normalize_provider_url(params.get("provider_url") or DEFAULT_PROVIDER_URL),
         api_key=api_key,
         model=params.get("model") or DEFAULT_MODEL,
         include_model=params.get("include_model", True),

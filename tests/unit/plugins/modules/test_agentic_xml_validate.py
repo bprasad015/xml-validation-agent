@@ -77,14 +77,17 @@ def test_parse_llm_decision_marks_unparseable_response_invalid():
 def test_collect_execution_context_reads_role_inventory_and_group_vars(tmp_path):
     agentic_xml_validate = _load_module()
     role_path = tmp_path / "roles" / "xml_validation"
-    inventory_path = tmp_path / "inventories" / "ci" / "hosts.ini"
-    group_vars_path = tmp_path / "group_vars"
+    inventory_path = tmp_path / "inventory" / "ci" / "hosts.yml"
+    group_vars_path = tmp_path / "inventory" / "ci" / "group_vars"
     role_tasks = role_path / "tasks"
     role_tasks.mkdir(parents=True)
     inventory_path.parent.mkdir(parents=True)
     group_vars_path.mkdir()
     (role_tasks / "main.yml").write_text("---\n- debug:\n    msg: role\n", encoding="utf-8")
-    inventory_path.write_text("[ci]\nlocalhost\n", encoding="utf-8")
+    inventory_path.write_text(
+        "all:\n  children:\n    ci:\n      hosts:\n        localhost:\n",
+        encoding="utf-8",
+    )
     (group_vars_path / "all.yml").write_text("---\nxml_value: from_group\n", encoding="utf-8")
 
     context = agentic_xml_validate.collect_execution_context(
@@ -95,7 +98,7 @@ def test_collect_execution_context_reads_role_inventory_and_group_vars(tmp_path)
     )
 
     used_paths = {Path(entry["path"]).name for entry in context["files"]}
-    assert used_paths == {"main.yml", "hosts.ini", "all.yml"}
+    assert used_paths == {"main.yml", "hosts.yml", "all.yml"}
     assert context["missing"] == []
     assert context["truncated"] is False
 
@@ -139,6 +142,36 @@ def test_resolve_api_key_prefers_explicit_value():
     )
 
     assert api_key == "explicit"
+
+
+def test_normalize_provider_url_appends_chat_completions_for_base_url():
+    agentic_xml_validate = _load_module()
+
+    normalized = agentic_xml_validate.normalize_provider_url(
+        "https://genai-sharedservice-americas.pwc.com"
+    )
+
+    assert normalized == "https://genai-sharedservice-americas.pwc.com/v1/chat/completions"
+
+
+def test_normalize_provider_url_keeps_chat_completions_path():
+    agentic_xml_validate = _load_module()
+
+    normalized = agentic_xml_validate.normalize_provider_url(
+        "https://api.openai.com/v1/chat/completions"
+    )
+
+    assert normalized == "https://api.openai.com/v1/chat/completions"
+
+
+def test_normalize_provider_url_appends_for_v1_root():
+    agentic_xml_validate = _load_module()
+
+    normalized = agentic_xml_validate.normalize_provider_url(
+        "https://example.test/v1"
+    )
+
+    assert normalized == "https://example.test/v1/chat/completions"
 
 
 def test_render_jinja_template_uses_template_vars(tmp_path):
