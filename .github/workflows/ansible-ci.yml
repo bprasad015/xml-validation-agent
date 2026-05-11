@@ -113,15 +113,19 @@ jobs:
           LLM_API_URL: ${{ secrets.LLM_API_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
+          set -euo pipefail
           if [ -n "$LLM_API_KEY" ]; then
+            required_vars=(LLM_API_KEY LLM_API_URL LLM_MODEL)
+            for name in "${required_vars[@]}"; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error::Real LLM mode selected, but '$name' is missing or empty."
+                exit 1
+              fi
+            done
             echo "use_real_llm=true" >> "$GITHUB_OUTPUT"
             echo "LLM_API_KEY=$LLM_API_KEY" >> "$GITHUB_ENV"
-            if [ -n "$LLM_API_URL" ]; then
-              echo "LLM_API_URL=$LLM_API_URL" >> "$GITHUB_ENV"
-            fi
-            if [ -n "$LLM_MODEL" ]; then
-              echo "LLM_MODEL=$LLM_MODEL" >> "$GITHUB_ENV"
-            fi
+            echo "LLM_API_URL=$LLM_API_URL" >> "$GITHUB_ENV"
+            echo "LLM_MODEL=$LLM_MODEL" >> "$GITHUB_ENV"
           else
             echo "use_real_llm=false" >> "$GITHUB_OUTPUT"
           fi

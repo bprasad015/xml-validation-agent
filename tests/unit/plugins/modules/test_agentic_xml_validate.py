@@ -144,6 +144,42 @@ def test_resolve_api_key_prefers_explicit_value():
     assert api_key == "explicit"
 
 
+def test_resolve_api_key_falls_back_to_llm_api_key():
+    agentic_xml_validate = _load_module()
+
+    api_key = agentic_xml_validate.resolve_api_key(
+        None,
+        "CUSTOM_KEY",
+        {"LLM_API_KEY": "llm-env-key"},
+    )
+
+    assert api_key == "llm-env-key"
+
+
+def test_resolve_provider_url_uses_llm_api_url_env():
+    agentic_xml_validate = _load_module()
+
+    provider_url = agentic_xml_validate.resolve_provider_url(
+        "",
+        "LLM_API_URL",
+        {"LLM_API_URL": "https://genai-sharedservice-americas.pwc.com"},
+    )
+
+    assert provider_url == "https://genai-sharedservice-americas.pwc.com"
+
+
+def test_resolve_model_uses_llm_model_env():
+    agentic_xml_validate = _load_module()
+
+    model = agentic_xml_validate.resolve_model(
+        "",
+        "LLM_MODEL",
+        {"LLM_MODEL": "azure.gpt-4o-mini"},
+    )
+
+    assert model == "azure.gpt-4o-mini"
+
+
 def test_normalize_provider_url_appends_chat_completions_for_base_url():
     agentic_xml_validate = _load_module()
 
@@ -172,6 +208,19 @@ def test_normalize_provider_url_appends_for_v1_root():
     )
 
     assert normalized == "https://example.test/v1/chat/completions"
+
+
+def test_build_provider_endpoints_generates_v1_and_non_v1_candidates():
+    agentic_xml_validate = _load_module()
+
+    endpoints = agentic_xml_validate.build_provider_endpoints(
+        "https://genai-sharedservice-americas.pwc.com"
+    )
+
+    assert endpoints == [
+        "https://genai-sharedservice-americas.pwc.com/v1/chat/completions",
+        "https://genai-sharedservice-americas.pwc.com/chat/completions",
+    ]
 
 
 def test_render_jinja_template_uses_template_vars(tmp_path):

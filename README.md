@@ -33,6 +33,12 @@ the rendered XML, sends the rendered configuration plus selected playbook, role,
 inventory, and vars context to an OpenAI-compatible LLM endpoint, and returns
 `valid`, `feedback`, `issues`, and `suggested_fix`.
 
+Environment fallback behavior:
+- `api_key` falls back to `api_key_env` (default `LLM_API_KEY`), then `LLM_API_KEY`, then `OPENAI_API_KEY`.
+- `provider_url` falls back to `provider_url_env` (default `LLM_API_URL`), then module default base URL.
+- `model` falls back to `model_env` (default `LLM_MODEL`), then `gpt-4o-mini`.
+- When a provider base URL is supplied, the module tries both `/v1/chat/completions` and `/chat/completions`.
+
 Run it on the controller when template and Ansible context files are local:
 
 ```yaml
@@ -56,6 +62,7 @@ For Azure-style endpoints, set `auth_header: api-key`, `auth_scheme: ""`, and
 
 CI behavior:
 - When `secrets.LLM_API_KEY` is set, agentic smoke tests call the real provider.
+- In real-provider mode, CI requires `secrets.LLM_API_URL` and `secrets.LLM_MODEL` as well.
 - When `secrets.LLM_API_KEY` is absent, CI automatically starts the local mock LLM server.
 
 ## Local Quick Start
