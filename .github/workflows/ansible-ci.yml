@@ -3,12 +3,32 @@ name: ansible-ci
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
+    branches:
+      - main
   push:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      llm_provider_profile:
+        description: LLM provider profile to use for role smoke tests
+        required: false
+        type: choice
+        default: organization_default
+        options:
+          - organization_default
+          - openai_public
+          - custom
+      llm_api_url:
+        description: LLM API base URL
+        required: false
+        type: string
+        default: https://genai-sharedservice-americas.pwc.com
+      llm_model:
+        description: LLM model name
+        required: false
+        type: string
+        default: azure.gpt-4o-mini
 
 env:
   PYTHON_VERSION: "3.11"
@@ -96,17 +116,58 @@ jobs:
 
       - name: Syntax-check role smoke playbooks
         run: |
-          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/role_smoke.yml --syntax-check
-          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/module_smoke.yml --syntax-check
-          ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/agentic_module_smoke.yml --syntax-check
+          ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/role_smoke.yml --syntax-check
+          ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/module_smoke.yml --syntax-check
+          ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/agentic_module_smoke.yml --syntax-check
 
       - name: Execute role smoke playbook
-        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/role_smoke.yml
+        run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/role_smoke.yml
 
       - name: Execute module smoke playbook
-        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/module_smoke.yml
+        run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/module_smoke.yml
+
+      - name: Resolve LLM execution mode
+        id: llm-mode
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_PROVIDER_PROFILE_INPUT: ${{ github.event.inputs.llm_provider_profile }}
+          LLM_API_URL_INPUT: ${{ github.event.inputs.llm_api_url }}
+          LLM_MODEL_INPUT: ${{ github.event.inputs.llm_model }}
+          DEFAULT_LLM_API_URL: https://genai-sharedservice-americas.pwc.com
+          DEFAULT_LLM_MODEL: azure.gpt-4o-mini
+          OPENAI_PUBLIC_API_URL: https://api.openai.com
+          OPENAI_PUBLIC_MODEL: gpt-4o-mini
+        run: |
+          set -euo pipefail
+          selected_profile="${LLM_PROVIDER_PROFILE_INPUT:-organization_default}"
+          resolved_llm_api_url="${LLM_API_URL_INPUT:-$DEFAULT_LLM_API_URL}"
+          resolved_llm_model="${LLM_MODEL_INPUT:-$DEFAULT_LLM_MODEL}"
+
+          if [ "$selected_profile" = "openai_public" ]; then
+            resolved_llm_api_url="$OPENAI_PUBLIC_API_URL"
+            resolved_llm_model="$OPENAI_PUBLIC_MODEL"
+          fi
+
+          echo "LLM_API_URL=$resolved_llm_api_url" >> "$GITHUB_ENV"
+          echo "LLM_MODEL=$resolved_llm_model" >> "$GITHUB_ENV"
+          echo "LLM_PROVIDER_PROFILE=$selected_profile" >> "$GITHUB_ENV"
+
+          if [ -n "$LLM_API_KEY" ]; then
+            required_vars=(LLM_API_KEY)
+            for name in "${required_vars[@]}"; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error::Real LLM mode selected, but '$name' is missing or empty."
+                exit 1
+              fi
+            done
+            echo "use_real_llm=true" >> "$GITHUB_OUTPUT"
+            echo "LLM_API_KEY=$LLM_API_KEY" >> "$GITHUB_ENV"
+          else
+            echo "use_real_llm=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Start mock LLM provider
+        if: steps.llm-mode.outputs.use_real_llm != 'true'
         run: |
           python tests/tools/mock_llm_server.py --host 127.0.0.1 --port 8765 &
           echo $! > mock-llm.pid
@@ -120,11 +181,14 @@ jobs:
 
       - name: Execute agentic module smoke playbook
         env:
+          LLM_API_KEY: ${{ env.LLM_API_KEY }}
+          LLM_API_URL: ${{ env.LLM_API_URL }}
+          LLM_MODEL: ${{ env.LLM_MODEL }}
           MOCK_LLM_PROVIDER_URL: http://127.0.0.1:8765/v1/chat/completions
-        run: ansible-playbook -i inventories/ci/hosts.ini tests/playbooks/agentic_module_smoke.yml
+        run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/agentic_module_smoke.yml
 
       - name: Stop mock LLM provider
-        if: always()
+        if: always() && steps.llm-mode.outputs.use_real_llm != 'true'
         run: |
           if [ -f mock-llm.pid ]; then
             kill "$(cat mock-llm.pid)"
@@ -155,14 +219,14 @@ jobs:
         run: ansible-galaxy collection install -r requirements.yml
 
       - name: Syntax-check integration playbook
-        run: ansible-playbook -i inventories/ci/hosts.ini playbooks/integration.yml --syntax-check
+        run: ansible-playbook -i inventory/ci/hosts.yml playbooks/integration.yml --syntax-check
 
       - name: Run integration playbook (pass 1)
-        run: ansible-playbook -i inventories/ci/hosts.ini playbooks/integration.yml | tee integration-run-1.log
+        run: ansible-playbook -i inventory/ci/hosts.yml playbooks/integration.yml | tee integration-run-1.log
 
       - name: Run integration playbook (pass 2)
         run: |
-          ansible-playbook -i inventories/ci/hosts.ini playbooks/integration.yml | tee integration-run-2.log
+          ansible-playbook -i inventory/ci/hosts.yml playbooks/integration.yml | tee integration-run-2.log
           grep -E "changed=0.*failed=0" integration-run-2.log
 
       - name: Run post-integration assertion

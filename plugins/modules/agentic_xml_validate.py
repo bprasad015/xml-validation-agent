@@ -5,6 +5,7 @@ import json
 import os
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as element_tree
 from pathlib import Path
@@ -18,7 +19,7 @@ version_added: "1.0.0"
 description:
   - Renders a local Jinja XML template, validates the rendered XML locally, and asks an
     OpenAI-compatible LLM endpoint for configuration review and suggested fixes.
-  - The intended collection FQCN is C(pwc.ansible.agentic_xml_validate).
+  - The intended collection FQCN is C(pwc.config_validation_agent.agentic_xml_validate).
   - Run this module on the controller, for example with C(delegate_to: localhost), when
     C(src), playbook, role, inventory, and variable paths live on the Ansible controller.
 options:
@@ -40,7 +41,7 @@ options:
     default: {}
   api_key:
     description:
-      - LLM API key. If omitted, C(api_key_env) and then C(OPENAI_API_KEY) are checked.
+      - LLM API key. If omitted, C(api_key_env), C(LLM_API_KEY), and C(OPENAI_API_KEY) are checked.
     type: str
     no_log: true
   api_key_env:
@@ -52,14 +53,24 @@ options:
     description:
       - Full OpenAI-compatible chat-completions URL for the LLM provider.
       - May point to enterprise ChatGPT, Azure OpenAI, or a self-hosted compatible endpoint.
+      - When only a base URL is provided, the module attempts both C(/v1/chat/completions)
+        and C(/chat/completions).
     type: str
-    default: https://api.openai.com/v1/chat/completions
+  provider_url_env:
+    description:
+      - Environment variable name to read when C(provider_url) is omitted.
+    type: str
+    default: LLM_API_URL
   model:
     description:
       - Model name sent in the request body.
       - Set C(include_model) to C(false) when the provider URL already binds a deployment.
     type: str
-    default: gpt-4o-mini
+  model_env:
+    description:
+      - Environment variable name to read when C(model) is omitted.
+    type: str
+    default: LLM_MODEL
   include_model:
     description:
       - Whether to include C(model) in the request body.
@@ -165,7 +176,7 @@ author:
 
 EXAMPLES = r"""
 - name: Validate rendered XML with enterprise LLM review
-  pwc.ansible.agentic_xml_validate:
+  pwc.config_validation_agent.agentic_xml_validate:
     src: "{{ playbook_dir }}/templates/xml_template.xml.j2"
     template_vars: "{{ vars }}"
     api_key: "{{ lookup('ansible.builtin.env', 'LLM_API_KEY') }}"
@@ -173,13 +184,13 @@ EXAMPLES = r"""
     model: "enterprise-chat-model"
     playbook_path: "{{ playbook_dir }}/site.yml"
     inventory_path: "{{ inventory_file | default(omit) }}"
-    group_vars_path: "{{ playbook_dir }}/../group_vars"
+    group_vars_path: "{{ playbook_dir }}/../inventory/ci/group_vars"
     role_path: "{{ role_path | default(omit) }}"
   delegate_to: localhost
   run_once: true
 
 - name: Validate through an Azure OpenAI deployment URL
-  pwc.ansible.agentic_xml_validate:
+  pwc.config_validation_agent.agentic_xml_validate:
     src: "{{ playbook_dir }}/templates/xml_template.xml.j2"
     template_vars: "{{ vars }}"
     api_key: "{{ lookup('ansible.builtin.env', 'AZURE_OPENAI_API_KEY') }}"
@@ -225,7 +236,7 @@ rendered_xml:
   returned: when requested
 """
 
-DEFAULT_PROVIDER_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_PROVIDER_BASE_URL = "https://api.openai.com"
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_PROMPT = """\
 You are an expert Ansible and XML configuration reviewer.
@@ -488,8 +499,9 @@ def resolve_api_key(
 
     env = environ or os.environ
     candidate_names = [api_key_env] if api_key_env else []
-    if "OPENAI_API_KEY" not in candidate_names:
-        candidate_names.append("OPENAI_API_KEY")
+    for name in ("LLM_API_KEY", "OPENAI_API_KEY"):
+        if name not in candidate_names:
+            candidate_names.append(name)
 
     for env_name in candidate_names:
         if env_name and env.get(env_name):
@@ -497,6 +509,98 @@ def resolve_api_key(
 
     names = ", ".join(name for name in candidate_names if name)
     raise LlmRequestError(f"LLM API key is required. Set api_key or one of: {names}.")
+
+
+def resolve_provider_url(
+    explicit_provider_url: str | None,
+    provider_url_env: str | None,
+    environ: dict[str, str] | os._Environ[str] | None = None,
+) -> str:
+    """Resolve provider URL from module input, env var, or default base URL."""
+    if explicit_provider_url and explicit_provider_url.strip():
+        return explicit_provider_url.strip()
+
+    env = environ or os.environ
+    candidate_names = [provider_url_env] if provider_url_env else []
+    if "LLM_API_URL" not in candidate_names:
+        candidate_names.append("LLM_API_URL")
+
+    for env_name in candidate_names:
+        if env_name and env.get(env_name):
+            value = str(env[env_name]).strip()
+            if value:
+                return value
+
+    return DEFAULT_PROVIDER_BASE_URL
+
+
+def resolve_model(
+    explicit_model: str | None,
+    model_env: str | None,
+    environ: dict[str, str] | os._Environ[str] | None = None,
+) -> str:
+    """Resolve model from module input, env var, or default."""
+    if explicit_model and explicit_model.strip():
+        return explicit_model.strip()
+
+    env = environ or os.environ
+    candidate_names = [model_env] if model_env else []
+    if "LLM_MODEL" not in candidate_names:
+        candidate_names.append("LLM_MODEL")
+
+    for env_name in candidate_names:
+        if env_name and env.get(env_name):
+            value = str(env[env_name]).strip()
+            if value:
+                return value
+
+    return DEFAULT_MODEL
+
+
+def build_provider_endpoints(provider_url: str) -> list[str]:
+    """Build OpenAI-compatible chat endpoints from a base URL or full endpoint."""
+    raw = provider_url.strip()
+    if not raw:
+        raw = DEFAULT_PROVIDER_BASE_URL
+
+    parsed = urllib.parse.urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return [raw]
+
+    path = parsed.path or ""
+    normalized_path = path.rstrip("/")
+    if normalized_path.endswith("/chat/completions"):
+        return [raw]
+
+    if normalized_path == "/v1":
+        candidates = [
+            urllib.parse.urlunparse(parsed._replace(path="/v1/chat/completions")),
+            urllib.parse.urlunparse(parsed._replace(path="/chat/completions")),
+        ]
+    elif normalized_path == "":
+        candidates = [
+            urllib.parse.urlunparse(parsed._replace(path="/v1/chat/completions")),
+            urllib.parse.urlunparse(parsed._replace(path="/chat/completions")),
+        ]
+    else:
+        candidates = [
+            urllib.parse.urlunparse(parsed._replace(path=f"{normalized_path}/v1/chat/completions")),
+            urllib.parse.urlunparse(parsed._replace(path=f"{normalized_path}/chat/completions")),
+        ]
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            deduped.append(candidate)
+    return deduped
+
+
+def normalize_provider_url(provider_url: str | None) -> str:
+    """Backward-compatible helper returning the first resolved endpoint."""
+    resolved = resolve_provider_url(provider_url, None)
+    return build_provider_endpoints(resolved)[0]
 
 
 def build_validation_prompt(
@@ -549,43 +653,62 @@ def query_llm_provider(
         if value is not None:
             headers[str(key)] = str(value)
 
-    body: dict[str, Any] = {
-        "messages": [
-            {
-                "role": "system",
-                "content": "Return only machine-readable JSON for XML validation.",
-            },
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": temperature,
-    }
-    if include_model and model:
-        body["model"] = model
-    body.update(request_options or {})
-
-    request = urllib.request.Request(
-        provider_url,
-        data=json.dumps(body).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
     ssl_context = None if validate_certs else ssl._create_unverified_context()
+    endpoint_errors: list[str] = []
+    endpoint_candidates = build_provider_endpoints(provider_url)
 
-    try:
-        with urllib.request.urlopen(request, timeout=timeout, context=ssl_context) as response:
-            response_body = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        body_text = exc.read().decode("utf-8", errors="replace")
-        raise LlmRequestError(
-            f"LLM provider returned HTTP {exc.code}: {body_text[:1000]}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise LlmRequestError(f"LLM provider request failed: {exc}") from exc
+    for endpoint in endpoint_candidates:
+        for strict_json in (True, False):
+            body: dict[str, Any] = {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Return only machine-readable JSON for XML validation.",
+                    },
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+            }
+            if include_model and model:
+                body["model"] = model
+            body.update(request_options or {})
+            if strict_json:
+                body["response_format"] = {"type": "json_object"}
 
-    try:
-        return json.loads(response_body)
-    except json.JSONDecodeError as exc:
-        raise LlmRequestError("LLM provider returned a non-JSON HTTP response.") from exc
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps(body).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+
+            try:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=timeout,
+                    context=ssl_context,
+                ) as response:
+                    response_body = response.read().decode("utf-8", errors="replace")
+            except urllib.error.HTTPError as exc:
+                body_text = exc.read().decode("utf-8", errors="replace")
+                endpoint_errors.append(f"{endpoint} -> HTTP {exc.code}: {body_text[:500]}")
+                continue
+            except urllib.error.URLError as exc:
+                endpoint_errors.append(f"{endpoint} -> request failed: {exc}")
+                continue
+
+            try:
+                return json.loads(response_body)
+            except json.JSONDecodeError:
+                endpoint_errors.append(f"{endpoint} -> non-JSON HTTP response")
+                continue
+
+    recent = (
+        " | ".join(endpoint_errors[-4:])
+        if endpoint_errors
+        else "No endpoint attempts were made."
+    )
+    raise LlmRequestError(f"LLM provider request failed across endpoints. {recent}")
 
 
 def _content_blocks_to_text(content: Any) -> str:
@@ -758,10 +881,18 @@ def run_validation(params: dict[str, Any]) -> dict[str, Any]:
     )
 
     api_key = resolve_api_key(params.get("api_key"), params.get("api_key_env"))
+    provider_url = resolve_provider_url(
+        params.get("provider_url"),
+        params.get("provider_url_env"),
+    )
+    model = resolve_model(
+        params.get("model"),
+        params.get("model_env"),
+    )
     llm_payload = query_llm_provider(
-        provider_url=params.get("provider_url") or DEFAULT_PROVIDER_URL,
+        provider_url=provider_url,
         api_key=api_key,
-        model=params.get("model") or DEFAULT_MODEL,
+        model=model,
         include_model=params.get("include_model", True),
         user_prompt=prompt,
         timeout=params.get("timeout") or 60,
@@ -819,8 +950,10 @@ def run_module() -> None:
             "template_vars": {"type": "dict", "required": False, "default": {}},
             "api_key": {"type": "str", "required": False, "no_log": True},
             "api_key_env": {"type": "str", "required": False, "default": "LLM_API_KEY"},
-            "provider_url": {"type": "str", "required": False, "default": DEFAULT_PROVIDER_URL},
-            "model": {"type": "str", "required": False, "default": DEFAULT_MODEL},
+            "provider_url": {"type": "str", "required": False, "default": ""},
+            "provider_url_env": {"type": "str", "required": False, "default": "LLM_API_URL"},
+            "model": {"type": "str", "required": False, "default": ""},
+            "model_env": {"type": "str", "required": False, "default": "LLM_MODEL"},
             "include_model": {"type": "bool", "required": False, "default": True},
             "prompt": {"type": "str", "required": False, "default": DEFAULT_PROMPT},
             "temperature": {"type": "float", "required": False, "default": 0.0},
