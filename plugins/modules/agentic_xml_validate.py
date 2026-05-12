@@ -683,7 +683,11 @@ def query_llm_provider(
             )
 
             try:
-                with urllib.request.urlopen(request, timeout=timeout, context=ssl_context) as response:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=timeout,
+                    context=ssl_context,
+                ) as response:
                     response_body = response.read().decode("utf-8", errors="replace")
             except urllib.error.HTTPError as exc:
                 body_text = exc.read().decode("utf-8", errors="replace")
@@ -699,7 +703,11 @@ def query_llm_provider(
                 endpoint_errors.append(f"{endpoint} -> non-JSON HTTP response")
                 continue
 
-    recent = " | ".join(endpoint_errors[-4:]) if endpoint_errors else "No endpoint attempts were made."
+    recent = (
+        " | ".join(endpoint_errors[-4:])
+        if endpoint_errors
+        else "No endpoint attempts were made."
+    )
     raise LlmRequestError(f"LLM provider request failed across endpoints. {recent}")
 
 
