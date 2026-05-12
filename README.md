@@ -61,8 +61,11 @@ For Azure-style endpoints, set `auth_header: api-key`, `auth_scheme: ""`, and
 `include_model: false` when the deployment is already encoded in `provider_url`.
 
 CI behavior:
+- `workflow_dispatch` supports optional inputs:
+  - `llm_api_url` (default `https://genai-sharedservice-americas.pwc.com`)
+  - `llm_model` (default `azure.gpt-4o-mini`)
 - When `secrets.LLM_API_KEY` is set, agentic smoke tests call the real provider.
-- In real-provider mode, CI requires `secrets.LLM_API_URL` and `secrets.LLM_MODEL` as well.
+- In real-provider mode, CI requires only `secrets.LLM_API_KEY`; URL/model come from workflow inputs or defaults.
 - When `secrets.LLM_API_KEY` is absent, CI automatically starts the local mock LLM server.
 
 ## Local Quick Start

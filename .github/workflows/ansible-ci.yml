@@ -9,6 +9,17 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      llm_api_url:
+        description: LLM API base URL
+        required: false
+        type: string
+        default: https://genai-sharedservice-americas.pwc.com
+      llm_model:
+        description: LLM model name
+        required: false
+        type: string
+        default: azure.gpt-4o-mini
 
 env:
   PYTHON_VERSION: "3.11"
@@ -110,12 +121,20 @@ jobs:
         id: llm-mode
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_URL: ${{ secrets.LLM_API_URL }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_API_URL_INPUT: ${{ github.event.inputs.llm_api_url }}
+          LLM_MODEL_INPUT: ${{ github.event.inputs.llm_model }}
+          DEFAULT_LLM_API_URL: https://genai-sharedservice-americas.pwc.com
+          DEFAULT_LLM_MODEL: azure.gpt-4o-mini
         run: |
           set -euo pipefail
+          resolved_llm_api_url="${LLM_API_URL_INPUT:-$DEFAULT_LLM_API_URL}"
+          resolved_llm_model="${LLM_MODEL_INPUT:-$DEFAULT_LLM_MODEL}"
+
+          echo "LLM_API_URL=$resolved_llm_api_url" >> "$GITHUB_ENV"
+          echo "LLM_MODEL=$resolved_llm_model" >> "$GITHUB_ENV"
+
           if [ -n "$LLM_API_KEY" ]; then
-            required_vars=(LLM_API_KEY LLM_API_URL LLM_MODEL)
+            required_vars=(LLM_API_KEY)
             for name in "${required_vars[@]}"; do
               if [ -z "${!name:-}" ]; then
                 echo "::error::Real LLM mode selected, but '$name' is missing or empty."
@@ -124,8 +143,6 @@ jobs:
             done
             echo "use_real_llm=true" >> "$GITHUB_OUTPUT"
             echo "LLM_API_KEY=$LLM_API_KEY" >> "$GITHUB_ENV"
-            echo "LLM_API_URL=$LLM_API_URL" >> "$GITHUB_ENV"
-            echo "LLM_MODEL=$LLM_MODEL" >> "$GITHUB_ENV"
           else
             echo "use_real_llm=false" >> "$GITHUB_OUTPUT"
           fi
