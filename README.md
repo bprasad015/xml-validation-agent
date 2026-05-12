@@ -62,11 +62,18 @@ For Azure-style endpoints, set `auth_header: api-key`, `auth_scheme: ""`, and
 
 CI behavior:
 - `workflow_dispatch` supports optional inputs:
+  - `llm_provider_profile` (`organization_default` | `openai_public` | `custom`)
   - `llm_api_url` (default `https://genai-sharedservice-americas.pwc.com`)
   - `llm_model` (default `azure.gpt-4o-mini`)
 - When `secrets.LLM_API_KEY` is set, agentic smoke tests call the real provider.
 - In real-provider mode, CI requires only `secrets.LLM_API_KEY`; URL/model come from workflow inputs or defaults.
 - When `secrets.LLM_API_KEY` is absent, CI automatically starts the local mock LLM server.
+
+Testing with a regular OpenAI API key:
+1. Set `secrets.LLM_API_KEY` to your OpenAI key.
+2. Run `ansible-ci` via `workflow_dispatch`.
+3. Select `llm_provider_profile: openai_public`.
+The workflow will automatically use `https://api.openai.com` and `gpt-4o-mini`.
 
 ## Local Quick Start
 

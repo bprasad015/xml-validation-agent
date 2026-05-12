@@ -10,6 +10,15 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      llm_provider_profile:
+        description: LLM provider profile to use for role smoke tests
+        required: false
+        type: choice
+        default: openai_public
+        options:
+          - organization_default
+          - openai_public
+          - custom
       llm_api_url:
         description: LLM API base URL
         required: false
@@ -121,17 +130,27 @@ jobs:
         id: llm-mode
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_PROVIDER_PROFILE_INPUT: ${{ github.event.inputs.llm_provider_profile }}
           LLM_API_URL_INPUT: ${{ github.event.inputs.llm_api_url }}
           LLM_MODEL_INPUT: ${{ github.event.inputs.llm_model }}
           DEFAULT_LLM_API_URL: https://genai-sharedservice-americas.pwc.com
           DEFAULT_LLM_MODEL: azure.gpt-4o-mini
+          OPENAI_PUBLIC_API_URL: https://api.openai.com
+          OPENAI_PUBLIC_MODEL: gpt-4o-mini
         run: |
           set -euo pipefail
+          selected_profile="${LLM_PROVIDER_PROFILE_INPUT:-organization_default}"
           resolved_llm_api_url="${LLM_API_URL_INPUT:-$DEFAULT_LLM_API_URL}"
           resolved_llm_model="${LLM_MODEL_INPUT:-$DEFAULT_LLM_MODEL}"
 
+          if [ "$selected_profile" = "openai_public" ]; then
+            resolved_llm_api_url="$OPENAI_PUBLIC_API_URL"
+            resolved_llm_model="$OPENAI_PUBLIC_MODEL"
+          fi
+
           echo "LLM_API_URL=$resolved_llm_api_url" >> "$GITHUB_ENV"
           echo "LLM_MODEL=$resolved_llm_model" >> "$GITHUB_ENV"
+          echo "LLM_PROVIDER_PROFILE=$selected_profile" >> "$GITHUB_ENV"
 
           if [ -n "$LLM_API_KEY" ]; then
             required_vars=(LLM_API_KEY)
