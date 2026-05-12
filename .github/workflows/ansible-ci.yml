@@ -14,7 +14,7 @@ on:
         description: LLM provider profile to use for role smoke tests
         required: false
         type: choice
-        default: openai_public
+        default: organization_default
         options:
           - organization_default
           - openai_public
