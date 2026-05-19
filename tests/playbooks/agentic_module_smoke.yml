@@ -11,7 +11,6 @@
       xml_validation_owner: network-automation
       xml_validation_change_ticket: CHG-2026-0001
       xml_validation_protocol: https
-      xml_validation_host: example.internal
       xml_validation_port: 8443
       xml_validation_tls_enabled: "true"
       xml_validation_certificate_profile: internal-mtls
