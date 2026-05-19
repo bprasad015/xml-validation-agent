@@ -264,7 +264,7 @@ Return only a JSON object with this schema:
       "severity": "error|warning|info",
       "location": "file/path:line, XML element, variable, or play/task when known",
       "message": "what is wrong, including the exact missing variable or broken XML tag",
-      "suggested_fix": "how to correct it, including the exact variable name, file, and line when known"
+      "suggested_fix": "how to correct it, including the exact variable name and file:line"
     }
   ]
 }
