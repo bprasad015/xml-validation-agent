@@ -63,6 +63,11 @@
             if (llm_api_key | length > 0)
             else (lookup('ansible.builtin.env', 'MOCK_LLM_PROVIDER_URL') | default(mock_llm_url, true) | trim)
           }}
+        agentic_xml_report_path: >-
+          {{
+            lookup('ansible.builtin.env', 'AGENTIC_XML_VALIDATION_REPORT')
+            | default(playbook_dir + '/../../agentic-xml-validation-report.md', true)
+          }}
 
     - name: Show selected LLM mode
       ansible.builtin.debug:
@@ -87,8 +92,66 @@
         extra_context:
           source: github-actions-smoke-test
           expected_service: agentic-xml-smoke
+        fail_on_invalid: false
         return_rendered: true
       register: agentic_xml_validation_result
+
+    - name: Write agentic XML validation report
+      ansible.builtin.copy:
+        dest: "{{ agentic_xml_report_path }}"
+        mode: "0644"
+        content: |
+          # Agentic XML Validation Report
+
+          ## Run Summary
+
+          | Field | Value |
+          | --- | --- |
+          | Overall result | {{ 'PASSED' if agentic_xml_validation_result.valid else 'FAILED' }} |
+          | Local XML parse | {{ 'PASSED' if agentic_xml_validation_result.local_xml_valid else 'FAILED' }} |
+          | LLM mode | {{ 'Real provider' if use_real_llm else 'Mock provider' }} |
+          | Provider profile | {{ lookup('ansible.builtin.env', 'LLM_PROVIDER_PROFILE') | default('local/mock', true) }} |
+          | Model | {{ llm_model if use_real_llm else 'mock-xml-validator' }} |
+          | Template | `{{ agentic_xml_template }}` |
+
+          ## AI Feedback
+
+          {{ agentic_xml_validation_result.feedback | default('No feedback returned.', true) }}
+
+          ## AI Suggested Fix
+
+          ```text
+          {{ agentic_xml_validation_result.suggested_fix | default('No suggested fix returned.', true) }}
+          ```
+
+          ## Issues
+
+          {% if agentic_xml_validation_result.issues | length > 0 %}
+          | Severity | Location | Message | Suggested fix |
+          | --- | --- | --- | --- |
+          {% for issue in agentic_xml_validation_result.issues %}
+          | {{ issue.severity | default('info') | string | replace('|', '\\|') }} | {{ issue.location | default('n/a') | string | replace('|', '\\|') }} | {{ issue.message | default('') | string | replace('|', '\\|') }} | {{ issue.suggested_fix | default('') | string | replace('|', '\\|') }} |
+          {% endfor %}
+          {% else %}
+          No issues reported.
+          {% endif %}
+
+          ## Context Files Used
+
+          {% if agentic_xml_validation_result.context_files_used | length > 0 %}
+          {% for context_file in agentic_xml_validation_result.context_files_used %}
+          - `{{ context_file }}`
+          {% endfor %}
+          {% else %}
+          No context files were supplied.
+          {% endif %}
+
+          ## Rendered XML
+
+          ```xml
+          {{ agentic_xml_validation_result.rendered_xml | default('Rendered XML was not returned.', true) }}
+          ```
+      delegate_to: localhost
 
     - name: Show XML validation summary
       ansible.builtin.debug:
@@ -104,6 +167,7 @@
       ansible.builtin.assert:
         that:
           - agentic_xml_validation_result.local_xml_valid
+          - agentic_xml_validation_result.valid
           - not agentic_xml_validation_result.changed
           - "'agentic-xml-smoke' in agentic_xml_validation_result.rendered_xml"
           - "'<serviceConfiguration environment=\"ci\" version=\"1.0\">' in agentic_xml_validation_result.rendered_xml"

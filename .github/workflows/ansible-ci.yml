@@ -185,7 +185,29 @@ jobs:
           LLM_API_URL: ${{ env.LLM_API_URL }}
           LLM_MODEL: ${{ env.LLM_MODEL }}
           MOCK_LLM_PROVIDER_URL: http://127.0.0.1:8765/v1/chat/completions
+          AGENTIC_XML_VALIDATION_REPORT: ${{ github.workspace }}/agentic-xml-validation-report.md
         run: ansible-playbook -i inventory/ci/hosts.yml tests/playbooks/agentic_module_smoke.yml
+
+      - name: Publish agentic XML validation report
+        if: always()
+        run: |
+          if [ -f agentic-xml-validation-report.md ]; then
+            cat agentic-xml-validation-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "# Agentic XML Validation Report"
+              echo
+              echo "No report file was generated."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload agentic XML validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentic-xml-validation-report
+          path: agentic-xml-validation-report.md
+          if-no-files-found: ignore
 
       - name: Stop mock LLM provider
         if: always() && steps.llm-mode.outputs.use_real_llm != 'true'
