@@ -113,6 +113,26 @@
           | Model | {{ llm_model if use_real_llm else 'mock-xml-validator' }} |
           | Template | `{{ agentic_xml_template }}` |
 
+          ## Developer Fix Guidance
+
+          {% if not agentic_xml_validation_result.local_xml_valid %}
+          **XML parse error:** {{ agentic_xml_validation_result.local_xml_error }}
+
+          {% if agentic_xml_validation_result.local_xml_error_line %}
+          Broken rendered XML location: line {{ agentic_xml_validation_result.local_xml_error_line }}, column {{ agentic_xml_validation_result.local_xml_error_column }}.
+          {% endif %}
+          {% endif %}
+
+          {% if agentic_xml_validation_result.template_variable_findings | length > 0 %}
+          ### Missing Template Variables
+
+          | Variable | Template line | Current behavior | Suggested fix |
+          | --- | --- | --- | --- |
+          {% for finding in agentic_xml_validation_result.template_variable_findings %}
+          | `{{ finding.variable }}` | `{{ finding.template_path }}:{{ finding.template_line }}` | Uses template default `{{ finding.default_value | default('none', true) }}` | {{ finding.suggested_fix | replace('|', '\\|') }} |
+          {% endfor %}
+          {% endif %}
+
           ## AI Feedback
 
           {{ agentic_xml_validation_result.feedback | default('No feedback returned.', true) }}
@@ -147,9 +167,13 @@
 
           ## Rendered XML
 
+          {% if agentic_xml_validation_result.rendered_xml_diagnostic is defined %}
+          {{ agentic_xml_validation_result.rendered_xml_diagnostic.markdown }}
+          {% else %}
           ```xml
           {{ agentic_xml_validation_result.rendered_xml | default('Rendered XML was not returned.', true) }}
           ```
+          {% endif %}
       delegate_to: localhost
 
     - name: Show XML validation summary
@@ -159,6 +183,7 @@
           local_xml_valid: "{{ agentic_xml_validation_result.local_xml_valid }}"
           feedback: "{{ agentic_xml_validation_result.feedback }}"
           issues: "{{ agentic_xml_validation_result.issues }}"
+          template_variable_findings: "{{ agentic_xml_validation_result.template_variable_findings }}"
           context_files_used: "{{ agentic_xml_validation_result.context_files_used }}"
           rendered_xml: "{{ agentic_xml_validation_result.rendered_xml }}"
 

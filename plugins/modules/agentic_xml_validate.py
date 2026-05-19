@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import urllib.error
 import urllib.parse
@@ -230,6 +231,15 @@ context_files_used:
   type: list
   elements: str
   returned: always
+template_variable_findings:
+  description: Template variables referenced by the XML template but not supplied.
+  type: list
+  elements: dict
+  returned: always
+rendered_xml_diagnostic:
+  description: Markdown-friendly rendered XML diagnostic snippet around parse failures.
+  type: dict
+  returned: always
 rendered_xml:
   description: Rendered XML content, returned only when C(return_rendered) is C(true).
   type: str
@@ -252,15 +262,18 @@ Return only a JSON object with this schema:
   "issues": [
     {
       "severity": "error|warning|info",
-      "location": "file/path, XML element, variable, or play/task when known",
-      "message": "what is wrong",
-      "suggested_fix": "how to correct it"
+      "location": "file/path:line, XML element, variable, or play/task when known",
+      "message": "what is wrong, including the exact missing variable or broken XML tag",
+      "suggested_fix": "how to correct it, including the exact variable name, file, and line when known"
     }
   ]
 }
 
 Set "valid" to true only when the configuration is well formed and you find no
 configuration, rendering, variable, inventory, role, or playbook inconsistencies.
+When invalid, be explicit enough for a developer to fix it without rereading the
+whole rendered XML. Prefer file:line locations, exact variable names such as
+xml_validation_host, and the exact missing or malformed XML tag.
 """
 
 CONTEXT_SUFFIXES = {
@@ -274,6 +287,9 @@ CONTEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+TEMPLATE_VARIABLE_PATTERN = re.compile(r"\bxml_validation_[A-Za-z0-9_]+\b")
+DEFAULT_FILTER_PATTERN = re.compile(r"\|\s*default\((.*?)\)")
+XML_PARSE_LINE_PATTERN = re.compile(r"line (\d+), column (\d+)")
 
 
 class AgenticXmlValidateError(Exception):
@@ -486,6 +502,93 @@ def validate_xml_payload(xml_content: str) -> tuple[bool, str | None]:
         return False, str(parse_error)
 
     return True, None
+
+
+def collect_template_variable_findings(
+    template_path: Path,
+    template_vars: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Find xml_validation variables referenced by the template but not supplied."""
+    supplied_vars = set((template_vars or {}).keys())
+    findings: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+
+    for line_number, line in enumerate(template_path.read_text(encoding="utf-8").splitlines(), 1):
+        for variable_name in sorted(set(TEMPLATE_VARIABLE_PATTERN.findall(line))):
+            key = (variable_name, line_number)
+            if key in seen or variable_name in supplied_vars:
+                continue
+            seen.add(key)
+
+            default_match = DEFAULT_FILTER_PATTERN.search(line)
+            default_value = default_match.group(1).strip() if default_match else ""
+            findings.append(
+                {
+                    "severity": "warning",
+                    "variable": variable_name,
+                    "template_path": str(template_path),
+                    "template_line": line_number,
+                    "template_expression": line.strip(),
+                    "default_value": default_value,
+                    "message": (
+                        f"{variable_name} is referenced in the XML template but was not "
+                        "provided in template_vars."
+                    ),
+                    "suggested_fix": (
+                        f"Add {variable_name} to template_vars, or confirm the template "
+                        "default is intentional."
+                    ),
+                }
+            )
+
+    return findings
+
+
+def _parse_xml_error_location(parse_error: str | None) -> dict[str, int | None]:
+    if not parse_error:
+        return {"line": None, "column": None}
+
+    match = XML_PARSE_LINE_PATTERN.search(parse_error)
+    if not match:
+        return {"line": None, "column": None}
+
+    return {"line": int(match.group(1)), "column": int(match.group(2))}
+
+
+def build_rendered_xml_diagnostic(
+    rendered_xml: str,
+    parse_error: str | None,
+    context_lines: int = 3,
+) -> dict[str, Any]:
+    """Build a GitHub Markdown-friendly XML snippet around the parse failure."""
+    location = _parse_xml_error_location(parse_error)
+    error_line = location["line"]
+    lines = rendered_xml.splitlines()
+
+    if not error_line:
+        numbered = [f"{index:>4}: {line}" for index, line in enumerate(lines, 1)]
+        return {
+            "line": None,
+            "column": None,
+            "markdown": "```xml\n" + "\n".join(numbered) + "\n```",
+        }
+
+    start = max(int(error_line) - context_lines, 1)
+    end = min(int(error_line) + context_lines, len(lines))
+    snippet = []
+    previous_line = int(error_line) - 1 if int(error_line) > 1 else None
+
+    for line_number in range(start, end + 1):
+        prefix = "-"
+        if line_number not in {previous_line, int(error_line)}:
+            prefix = " "
+        snippet.append(f"{prefix} {line_number:>4}: {lines[line_number - 1]}")
+
+    return {
+        "line": error_line,
+        "column": location["column"],
+        "markdown": "```diff\n" + "\n".join(snippet) + "\n```",
+    }
 
 
 def resolve_api_key(
@@ -859,7 +962,12 @@ def run_validation(params: dict[str, Any]) -> dict[str, Any]:
     except TemplateRenderError as exc:
         return _invalid_render_result(src, exc)
 
+    template_variable_findings = collect_template_variable_findings(
+        src_path,
+        params.get("template_vars") or {},
+    )
     local_valid, parse_error = validate_xml_payload(rendered_xml)
+    rendered_xml_diagnostic = build_rendered_xml_diagnostic(rendered_xml, parse_error)
     execution_context = collect_execution_context(
         base_dir=base_dir,
         playbook_path=params.get("playbook_path"),
@@ -934,6 +1042,10 @@ def run_validation(params: dict[str, Any]) -> dict[str, Any]:
         "missing_context_paths": execution_context["missing"],
         "local_xml_valid": local_valid,
         "local_xml_error": parse_error,
+        "local_xml_error_line": rendered_xml_diagnostic["line"],
+        "local_xml_error_column": rendered_xml_diagnostic["column"],
+        "rendered_xml_diagnostic": rendered_xml_diagnostic,
+        "template_variable_findings": template_variable_findings,
     }
     if params.get("return_rendered"):
         result["rendered_xml"] = rendered_xml
