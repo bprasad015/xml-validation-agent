@@ -13,7 +13,7 @@
   <backendPool>
 {% for backend in xml_validation_backend_pool | default([]) %}
     <member name="{{ backend.name | e }}" weight="{{ backend.weight | default(100) }}">
-      <host>{{ backend.host | e }}
+      <host>{{ backend.host | e }}</host>
       <port>{{ backend.port | default(443) }}</port>
     </member>
 {% else %}
