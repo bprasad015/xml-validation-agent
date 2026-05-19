@@ -132,6 +132,41 @@ def test_build_validation_prompt_includes_rendered_xml_and_context():
     assert '"play": "integration"' in prompt
 
 
+def test_collect_template_variable_findings_reports_missing_vars(tmp_path):
+    agentic_xml_validate = _load_module()
+    template_path = tmp_path / "service_config.xml.j2"
+    template_path.write_text(
+        '<host>{{ xml_validation_host | default("localhost") | e }}</host>\n'
+        "<port>{{ xml_validation_port | default(443) }}</port>\n",
+        encoding="utf-8",
+    )
+
+    findings = agentic_xml_validate.collect_template_variable_findings(
+        template_path,
+        {"xml_validation_port": 8443},
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["variable"] == "xml_validation_host"
+    assert findings[0]["template_line"] == 1
+    assert '"localhost"' in findings[0]["default_value"]
+
+
+def test_build_rendered_xml_diagnostic_marks_parse_error_line_red():
+    agentic_xml_validate = _load_module()
+
+    diagnostic = agentic_xml_validate.build_rendered_xml_diagnostic(
+        "<root>\n  <host>example.internal\n  <port>8443</port>\n</root>",
+        "mismatched tag: line 4, column 2",
+    )
+
+    assert diagnostic["line"] == 4
+    assert diagnostic["column"] == 2
+    assert diagnostic["markdown"].startswith("```diff")
+    assert "-    3:   <port>8443</port>" in diagnostic["markdown"]
+    assert "-    4: </root>" in diagnostic["markdown"]
+
+
 def test_resolve_api_key_prefers_explicit_value():
     agentic_xml_validate = _load_module()
 
